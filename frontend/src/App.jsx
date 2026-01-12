@@ -35,7 +35,8 @@ const SOCIAL_LINKS = {
   twitter: "https://twitter.com/yourusername",
 };
 
-const API_URL = "http://localhost:5000";
+// const API_URL = "http://localhost:5000";
+const API_URL = "https://portfolio-2-u27u.onrender.com";
 
 function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);

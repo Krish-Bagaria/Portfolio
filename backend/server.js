@@ -9,7 +9,19 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+// app.use(cors());
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173", // Vite dev server
+      "https://portfolio-seven-teal-32.vercel.app/", // Replace with your Vercel URL
+      // "https://your-frontend-git-main-yourusername.vercel.app", // Vercel preview URL
+    ],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -25,9 +37,9 @@ const transporter = nodemailer.createTransport({
 // Verify transporter configuration
 transporter.verify((error, success) => {
   if (error) {
-    console.log("❌ Email configuration error:", error);
+    console.log("Email configuration error:", error);
   } else {
-    console.log("✅ Server is ready to send emails");
+    console.log("Server is ready to send emails");
   }
 });
 
@@ -216,12 +228,5 @@ app.use((error, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════╗
-║   🚀 Krish's Portfolio Backend        ║
-║   ✅ Running on port ${PORT}            ║
-║   📧 Email: ${process.env.EMAIL_USER || "Not configured"}
-║   🌐 http://localhost:${PORT}           ║
-╚════════════════════════════════════════╝
-  `);
+  console.log(`Server running on port ${PORT}`);
 });

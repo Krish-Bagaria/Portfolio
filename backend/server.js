@@ -91,12 +91,19 @@ const transporter = nodemailer.createTransport({
   socketTimeout: 10000,
 });
 
-// Verify transporter configuration
+// Verify transporter configuration on startup
 transporter.verify((error, success) => {
   if (error) {
-    console.log("Email configuration error:", error);
+    console.error("❌ Email configuration error:", error.message);
+    console.error("Full error:", error);
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error(
+        "⚠️  WARNING: EMAIL_USER or EMAIL_PASS environment variables are not set!"
+      );
+    }
   } else {
-    console.log("Server is ready to send emails");
+    console.log("✅ Server is ready to send emails");
+    console.log("📧 Email configured for:", process.env.EMAIL_USER);
   }
 });
 
@@ -126,6 +133,48 @@ app.get("/api/keepalive", (req, res) => {
     message: "Server is awake",
     timestamp: new Date().toISOString(),
   });
+});
+
+// Test email endpoint (for debugging)
+app.post("/api/test-email", async (req, res) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    return res.status(500).json({
+      success: false,
+      message:
+        "Email configuration missing. Please set EMAIL_USER and EMAIL_PASS environment variables.",
+    });
+  }
+
+  try {
+    const testEmail = {
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_USER,
+      subject: "Test Email from Portfolio Backend",
+      html: `
+        <h2>Test Email</h2>
+        <p>This is a test email from your portfolio backend.</p>
+        <p>If you received this, your email configuration is working correctly!</p>
+        <p>Timestamp: ${new Date().toISOString()}</p>
+      `,
+    };
+
+    const info = await transporter.sendMail(testEmail);
+    console.log("✅ Test email sent:", info.messageId);
+
+    res.json({
+      success: true,
+      message: "Test email sent successfully!",
+      messageId: info.messageId,
+    });
+  } catch (error) {
+    console.error("❌ Test email error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to send test email",
+      error: error.message,
+      details: error.toString(),
+    });
+  }
 });
 
 // Contact form endpoint
@@ -161,21 +210,29 @@ app.post("/api/contact", async (req, res) => {
     }
   });
 
-  // Respond immediately to prevent timeout
-  res.status(200).json({
-    success: true,
-    message: "Message received! I'll get back to you soon.",
-  });
+  // Check if email is configured before responding
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error("❌ Email not configured: EMAIL_USER or EMAIL_PASS missing");
+    return res.status(500).json({
+      success: false,
+      message:
+        "Email service not configured. Please contact the administrator.",
+    });
+  }
 
-  // Send emails asynchronously (don't wait for completion)
-  (async () => {
-    try {
-      // Email to you (portfolio owner)
-      const mailToOwner = {
-        from: process.env.EMAIL_USER,
-        to: process.env.EMAIL_USER,
-        subject: `Portfolio Contact: ${subject || "New Message from " + name}`,
-        html: `
+  // Send emails and wait for them (but with timeout protection)
+  try {
+    console.log("📧 Attempting to send emails...");
+    console.log("📧 From:", process.env.EMAIL_USER);
+    console.log("📧 To owner:", process.env.EMAIL_USER);
+    console.log("📧 To sender:", email);
+
+    // Email to you (portfolio owner)
+    const mailToOwner = {
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_USER,
+      subject: `Portfolio Contact: ${subject || "New Message from " + name}`,
+      html: `
           <!DOCTYPE html>
           <html>
           <head>
@@ -228,14 +285,14 @@ app.post("/api/contact", async (req, res) => {
           </body>
           </html>
         `,
-      };
+    };
 
-      // Auto-reply to sender
-      const mailToSender = {
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: "Thanks for reaching out! 🎉",
-        html: `
+    // Auto-reply to sender
+    const mailToSender = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Thanks for reaching out! 🎉",
+      html: `
           <!DOCTYPE html>
           <html>
           <head>
@@ -276,28 +333,69 @@ app.post("/api/contact", async (req, res) => {
           </body>
           </html>
         `,
-      };
+    };
 
-      // Send both emails with timeout
-      const sendEmailWithTimeout = (mailOptions, timeout = 10000) => {
-        return Promise.race([
-          transporter.sendMail(mailOptions),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Email timeout")), timeout)
-          ),
-        ]);
-      };
+    // Send both emails sequentially with timeout
+    const sendEmailWithTimeout = (mailOptions, emailType, timeout = 20000) => {
+      return Promise.race([
+        transporter.sendMail(mailOptions),
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(`Email timeout after ${timeout}ms for ${emailType}`)
+              ),
+            timeout
+          )
+        ),
+      ]);
+    };
 
-      await sendEmailWithTimeout(mailToOwner);
-      console.log("✅ Email to owner sent successfully");
+    console.log("📤 Sending email to owner...");
+    const ownerResult = await sendEmailWithTimeout(mailToOwner, "owner");
+    console.log("✅ Email to owner sent successfully!");
+    console.log("   Message ID:", ownerResult.messageId);
+    console.log("   Response:", ownerResult.response);
 
-      await sendEmailWithTimeout(mailToSender);
-      console.log("✅ Auto-reply email sent successfully");
-    } catch (error) {
-      console.error("❌ Error sending email:", error);
-      // Log error but don't fail the request since we already responded
+    console.log("📤 Sending auto-reply to sender...");
+    const senderResult = await sendEmailWithTimeout(mailToSender, "sender");
+    console.log("✅ Auto-reply email sent successfully!");
+    console.log("   Message ID:", senderResult.messageId);
+    console.log("   Response:", senderResult.response);
+
+    // Respond with success
+    res.status(200).json({
+      success: true,
+      message: "Message sent successfully! I'll get back to you soon.",
+    });
+  } catch (error) {
+    console.error("❌ Error sending email:");
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error response:", error.response);
+    console.error("Error stack:", error.stack);
+    console.error("Full error object:", JSON.stringify(error, null, 2));
+
+    // Common Gmail errors
+    if (error.code === "EAUTH") {
+      console.error(
+        "⚠️  Authentication failed. Make sure you're using an App Password, not your regular Gmail password."
+      );
+    } else if (error.code === "ECONNECTION" || error.code === "ETIMEDOUT") {
+      console.error(
+        "⚠️  Connection timeout. Check your internet connection or Gmail service status."
+      );
+    } else if (error.response) {
+      console.error("⚠️  Gmail API error:", error.response);
     }
-  })();
+
+    // Still respond to user (don't reveal internal errors)
+    res.status(500).json({
+      success: false,
+      message:
+        "Failed to send message. Please try again later or contact me directly via email.",
+    });
+  }
 });
 
 // 404 handler
